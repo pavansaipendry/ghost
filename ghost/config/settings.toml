@@ -1,0 +1,14 @@
+[window]
+width = 500
+height = 700
+x = -1          # -1 = center on screen
+y = -1
+opacity = 0.35  # background alpha (0.0 - 1.0) — translucent panel
+
+[display]
+font_size = 15
+font_family = "-apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif"
+mono_font = "'SF Mono', 'Menlo', 'Monaco', monospace"
+
+[keys]
+modifier = "ctrl"  # modifier key for global shortcuts

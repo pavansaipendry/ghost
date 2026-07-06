@@ -1,0 +1,35 @@
+# Secrets — NEVER commit (each machine has its own)
+.env
+*.key
+
+# Python virtualenv — not portable across machines; rebuild with requirements-full.txt
+venv/
+.venv/
+env/
+
+# Python caches / build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Session recordings + transcripts — large, personal, per-machine
+sessions/
+
+# Editor / OS cruft
+.DS_Store
+*.bak
+*.pre_skill.bak
+
+# Audio scratch
+*.wav
+
+# relay_server is its own git repo, deployed separately to Render — manage it on
+# its own, not inside this sync repo (committing it here creates a broken gitlink).
+relay_server/
+
+# gitlink form (no trailing slash) so a git add -A can't re-add it
+relay_server

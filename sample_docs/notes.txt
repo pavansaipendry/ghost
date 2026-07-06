@@ -1,0 +1,28 @@
+Meeting Notes - Project Alpha
+=============================
+
+Date: March 15, 2026
+Attendees: Sarah, Mike, Pavan, Lisa
+
+Discussion Points:
+------------------
+1. Timeline review
+   - Phase 1 complete (on schedule)
+   - Phase 2 starting next week
+   - Target launch: April 30
+
+2. Budget status
+   - Spent: $120K of $200K allocated
+   - Remaining runway comfortable for scope
+
+3. Technical decisions
+   - Moving to Python for backend services
+   - Frontend stays on React
+   - Database: PostgreSQL (confirmed)
+
+4. Open questions
+   - Need UX review for onboarding flow
+   - API rate limiting strategy TBD
+   - Mobile support timeline unclear
+
+Next meeting: March 22, 2026
