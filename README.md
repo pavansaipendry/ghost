@@ -72,7 +72,6 @@ Use **headphones** so your mic doesn't echo the other side. On speakers, add
 | Hold **Ctrl** | Make the overlay clickable (release = click-through again) |
 | **Ctrl + a** | Focus the "Ask the LLM" box — type a question, Enter to send |
 | **Ctrl + 0** | AI view |
-| **Ctrl + 1–7** | Document slots |
 | **Double-tap Right-Option** | Answer the current question now |
 | **Double-tap Right-Shift** | Answer what's on the screen (vision) |
 | **Double-tap Right-Command** | Toggle the floating screen box |
