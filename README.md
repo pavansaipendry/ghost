@@ -70,7 +70,7 @@ Use **headphones** so your mic doesn't echo the other side. On speakers, add
 | Shortcut | Action |
 |---|---|
 | Hold **Ctrl** | Make the overlay clickable (release = click-through again) |
-| **Ctrl + A** | Focus the "Ask the LLM" box — type a question, Enter to send |
+| **Ctrl + a** | Focus the "Ask the LLM" box — type a question, Enter to send |
 | **Ctrl + 0** | AI view |
 | **Ctrl + 1–7** | Document slots |
 | **Double-tap Right-Option** | Answer the current question now |
