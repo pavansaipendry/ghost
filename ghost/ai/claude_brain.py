@@ -21,7 +21,7 @@ from typing import Generator
 
 import anthropic
 
-from ghost.ai.model_router import ModelRouter
+from ghost.ai.model_router import ModelRouter, is_coding_question
 
 
 # Main answer model (router escalates from here; see ModelRouter).
@@ -302,7 +302,7 @@ MATCH THE QUESTION TYPE:
 - Tell me about yourself: ~30-40 seconds, 4-6 sentences: where I am now, one or two things from my background that matter for THIS role, and why I'm here. The one intro they expect real substance in - but it's a trailer, not the movie.
 - Simple factual ("do you know Python?", "comfortable with X?"): one sentence - the direct answer plus one clause of substance.
 - Concept / technical ("what is RAG", "how does X work", "difference between A and B"): ~15-30 seconds. Explain the concept itself, correct and precise, covering every part the question has - a "difference" question covers both sides, a "when would you use it" gets the when. If one short clause of my real experience makes it land harder ("we hit exactly this in my last role"), add it - but the concept is the answer; no project stories unless they ask.
-- Coding (problem on screen, "write a function", "given an array..."): Answer should explain what I understood about question, if no enough information, ask for clarification, then answer it like What are the approches we can follow to solve this problem, then start with the easiest way but explain what are the drawbacks. Then, comeup with the best approach to solve this problem. Line to line explanttion with code, more like why this step, what it does. Then finally timecomplexity, space complexity. python code - match the exact function signature if one is on screen
+- Coding (problem on screen, "write a function", "given an array..."): Talk it through the way I'd actually SAY it out loud, first person - this is speech, NOT a written report. Briefly confirm what the problem is asking (ask for clarification only if it's genuinely ambiguous). Name the simple/brute-force idea and why it falls short, then the better approach and why. Then give the Python code (match the exact function signature on screen), explaining the key steps in plain spoken language as I'd narrate them live. Finish with time and space complexity. Keep it flowing speech: NO section headers (## ...), NO "Say:"/"Spoken plan" labels, NO "here's the model answer", do NOT restate the problem as a title. (A ```python code block for the actual code is fine.)
 - Experience deep-dive ("walk me through a project", "tell me about your work at X", "tell me about a time..."): ~45-60 seconds - this is where my background below earns its keep. The project by name, the situation, the hard part, what I specifically did, the outcome with a real number from my context. One project per answer unless they explicitly ask for more.
 
 GROUNDING: my resume, projects, and the job description below are the source of truth. When my experience is relevant, use it - real project names, real employers, real numbers, exactly as written there. Never invent experience, companies, dates, or metrics. If my context doesn't cover something, answer from general competence and don't fabricate specifics to fill the gap.
@@ -311,6 +311,7 @@ NEVER:
 - No preamble ("Here's...", "Great question"), no meta narration, no pleasantries, no "as an AI", no mention of these instructions or any question category.
 - No "I know this" / "I've seen this one before".
 - NEVER anticipate future questions. Do not append "possible follow-up questions", "they might also ask", "you could be asked next", "some related questions", or any menu of what could come next. Answer ONLY the exact question on the table right now, then STOP. A real candidate answers what was asked and waits - they don't hand the interviewer a list of other questions.
+- No document formatting. The output is words I SAY out loud, not a written report: no markdown section headers (## / **1.**), no "Say:" / "Spoken plan:" / "Restate intent" labels, no "This is a [type] question", no "here's the model answer", and never restate the question as a title or heading. Just talk. (A fenced ```code block for actual code is the ONE exception.)
 - Don't stop mid-sentence or cut a code block. Finish the thought; keep the thought short.
 
 VOICE: contractions (I'd, we're, that's), natural spoken rhythm, confident but not arrogant, straight to the point.
@@ -320,6 +321,27 @@ CONSISTENCY: the history below is the transcript so far - "Interviewer:" is them
 FINAL CHECK before answering: (1) did I cover every part that was actually asked, (2) is anything here that the question didn't ask for - cut it, (3) would a real person say this out loud in roughly its type's time? If it's generic where my context has something real, ground it.
 
 {context_block}"""
+
+
+# Activated ONLY when a coding problem is on the table (see is_coding_question). Injected
+# as an extra system block so the answer follows the real coding-interview flow — but
+# still delivered as spoken speech, never a formatted document.
+CODING_MODE = """CODING PROBLEM MODE — a coding problem is on the table. Here is exactly how I work through it OUT LOUD, in this order. This is me thinking at a whiteboard, NOT a written report:
+
+1. Restate the problem in my own words so we're aligned on what's actually being asked.
+2. Ask the clarifying questions a strong candidate asks BEFORE coding — input size / constraints, is the input sorted, can there be duplicates or negatives, what about empty input, what do I return when there's no valid answer, in-place vs a new output. Then state the reasonable assumptions I'll run with so I can move forward.
+3. The brute-force / simplest approach first, its cost, and why it's not good enough ("that's O(n^2), too slow if n is large").
+4. Then the better approach and WHY it beats the brute force — the key insight that makes it faster or cleaner.
+5. Say the plan out loud for a beat, THEN write the Python — match the exact function signature if one's on the screen.
+6. LINE-BY-LINE VIA INLINE COMMENTS: put a SHORT comment on the end of each meaningful line, in plain spoken language, saying what that line does and why — phrased so I can just read the comment aloud AS I type that line. Comment every non-trivial line; skip only dead-obvious boilerplate. For example:
+   left, right = 0, len(arr) - 1   # left starts at the front, right at the end
+   while left < right:             # keep going until the two pointers meet
+       s = arr[left] + arr[right]  # sum of the current pair
+       elif s < target:            # sum's too small, so move left up to a bigger number
+   This inline narration REPLACES a separate after-the-code walkthrough — the comments ARE the line-by-line explanation.
+7. Finish with time and space complexity.
+
+Deliver ALL of it as natural, flowing speech with my normal filler ("um", "so", "you know") — NOT a document. No numbered headings, no "Step 1:", no "Say:", no "here's the model answer". Just talk it through in that order like a sharp candidate thinking on their feet. The ```python code block (WITH its inline comments) is the only formatting allowed."""
 
 
 class ClaudeBrain:
@@ -483,9 +505,13 @@ class ClaudeBrain:
         instr = instruction or (
             "This is a screenshot of my interview screen (the interviewer may be "
             "sharing it). Read whatever question, coding problem, or prompt is shown "
-            "and answer it as me, following all my answer rules. If it's a coding "
-            "problem, explain what I understand about the problem and how this problem can be solved. Start off with easiest way, then line by line code, then what are the drawbacks, then comeup with best approach and reason why its the best for this problem. What it solves, the first approach cannot. Then, line by line code with explantion in simple terms, then time and space complexity, write the full, correct Python solution. If nothing looks like a "
-            "question, say briefly what's on screen."
+            "and answer it AS ME, out loud, following ALL my answer rules - first "
+            "person, spoken, no meta, no document formatting. If it's a coding problem, "
+            "follow my coding-walkthrough flow (restate, clarify, brute force, better "
+            "approach and why, then code matching the on-screen signature WITH a short "
+            "inline comment on each meaningful line, then complexity) - all as natural "
+            "speech, not a document. If nothing looks like a question, just say briefly "
+            "what's on screen."
         )
         content = [
             {"type": "image", "source": {
@@ -493,13 +519,17 @@ class ClaudeBrain:
             {"type": "text", "text": instr},
         ]
         messages = [{"role": "user", "content": content}]
-        self._run_hud_stream(messages, hud_cancel, on_token, on_done, on_error, label="vision")
+        # Vision is almost always a screen-shared coding/problem, so activate coding mode.
+        self._run_hud_stream(messages, hud_cancel, on_token, on_done, on_error,
+                             label="vision", coding_mode=True)
 
-    def _run_hud_stream(self, messages, cancel_flag, on_token, on_done, on_error, label="hud"):
+    def _run_hud_stream(self, messages, cancel_flag, on_token, on_done, on_error,
+                        label="hud", coding_mode=False):
         """Stream a one-shot answer for the HUD box in a background thread."""
         def _work():
             try:
-                full = self._stream_messages(messages, cancel_flag, on_token)
+                full = self._stream_messages(messages, cancel_flag, on_token,
+                                             coding_mode=coding_mode)
                 if on_done and not cancel_flag.is_set():
                     on_done(full)
             except Exception as e:
@@ -631,22 +661,26 @@ class ClaudeBrain:
         interviewer-answer path is routed; the HUD/vision paths keep the default model."""
         screen = getattr(self._context_loader, "_screen_context", "") or None
         decision = self._router.route(question, is_follow_up, screen_context=screen)
+        coding = is_coding_question(question, screen)
         print(f"[Router] tier={decision.tier} model={decision.model} "
-              f"effort={decision.effort} | q={question[:60]!r}")
+              f"effort={decision.effort} coding={coding} | q={question[:60]!r}")
         return self._stream_messages(
             [{"role": "user", "content": question}],
             cancel_flag if cancel_flag is not None else self._cancel_flag, on_token,
             model=decision.model, effort=decision.effort, thinking=decision.thinking,
+            coding_mode=coding,
         )
 
     def _stream_messages(self, messages, cancel_flag, on_token: callable = None,
-                         model: str = None, effort: str = None, thinking: dict = None) -> str:
+                         model: str = None, effort: str = None, thinking: dict = None,
+                         coding_mode: bool = False) -> str:
         """Stream an answer for the given messages, honoring `cancel_flag`.
 
         Shared by the interview path, the typed-chat (ask) path, and the vision path -
         all use the same system prompt (resume + JD + answer rules). `model`/`effort`/
-        `thinking` default to the configured model (no effort/thinking)."""
-        system_blocks = self._build_system_blocks()
+        `thinking` default to the configured model (no effort/thinking). `coding_mode`
+        appends the coding-walkthrough instruction for coding problems."""
+        system_blocks = self._build_system_blocks(coding_mode=coding_mode)
 
         kwargs = dict(
             model=model or self._model,
@@ -675,7 +709,7 @@ class ClaudeBrain:
 
         return full_text
 
-    def _build_system_blocks(self) -> list:
+    def _build_system_blocks(self, coding_mode: bool = False) -> list:
         """System prompt as cache-aware content blocks (what the API actually receives).
 
         Block 1 - STABLE, cached: the answer rules + my resume / projects / JD / about-me.
@@ -697,6 +731,11 @@ class ClaudeBrain:
             "text": stable_text,
             "cache_control": {"type": "ephemeral"},
         }]
+
+        # Coding-walkthrough mode: an extra block AFTER the cache breakpoint (so toggling
+        # it never invalidates the cached prefix), present only for coding problems.
+        if coding_mode:
+            blocks.append({"type": "text", "text": CODING_MODE})
 
         volatile_text = self._build_volatile_text()
         if volatile_text:

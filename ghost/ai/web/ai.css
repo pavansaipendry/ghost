@@ -488,6 +488,29 @@ html, body {
 .ai-ask-input:focus { border-color: rgba(74, 222, 128, 0.5); }
 .ai-ask-input::placeholder { color: rgba(255, 255, 255, 0.3); }
 
+/* ── Ctrl+B: DARK-TEXT MODE ───────────────────────────────────────────────
+   Light text disappears when the screen BEHIND Ghost is white. Ctrl+B toggles
+   `dark-text` on <body>, flipping the readable text to near-black with a faint
+   white halo (stays legible over lighter AND darker patches). Ctrl+B reverts. */
+body.dark-text .msg-text,
+body.dark-text .ai-status-text,
+body.dark-text .ai-empty,
+body.dark-text .ai-empty .ai-logo,
+body.dark-text .ai-ask-input {
+    color: #0b0b0d !important;
+    text-shadow: 0 0 2px rgba(255,255,255,0.8), 0 0 4px rgba(255,255,255,0.5) !important;
+}
+body.dark-text .msg-label { color: #2b2b2b !important; text-shadow: none !important; }
+body.dark-text .ai-ask-input::placeholder { color: rgba(0,0,0,0.45) !important; }
+/* Code blocks get a light card + dark code so they read on white too. */
+body.dark-text .msg-text .md-code,
+body.dark-text .msg-text .md-code pre,
+body.dark-text .msg-text .md-code code {
+    background: rgba(255,255,255,0.88) !important;
+    color: #0b0b0d !important;
+    text-shadow: none !important;
+}
+
 .ai-empty {
     margin: auto;
     text-align: center;

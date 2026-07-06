@@ -91,6 +91,39 @@ def _contains_any(text: str, needles) -> bool:
     return any(n in text for n in needles)
 
 
+# A real coding problem shown on the shared screen (function stub, examples, constraints)
+# — used so a LeetCode problem the interviewer only SHOWS still triggers coding mode.
+_SCREEN_CODE_SIGNALS = (
+    "def ", "class solution", "function", "return", "example 1", "example:",
+    "constraints", "input:", "output:", "->", "leetcode", "for i in", "nums[",
+)
+
+
+# Extra coding signals not in the router's tier keywords: data-structure phrasings the
+# exact `_CODING` needles miss ("given a SORTED array" vs "given an array") and explicit
+# complexity constraints, which only ever show up in coding problems.
+_CODING_HINTS = (
+    "sorted array", "two pointer", "two-pointer", "in-place", "subsequence",
+    "sum to", "sums to", "add up to", "o(n", "o(1", "o(log", "o(n^2", "o(nlog",
+    "time complexity", "space complexity",
+)
+
+
+def is_coding_question(question: str = "", screen_context: str = None) -> bool:
+    """True when the interviewer wants CODE — a LeetCode-style prompt in the question,
+    a hard algorithmic ask, or a coding problem sitting on the shared screen. Reuses the
+    router's coding keyword sets so detection lives in ONE place; drives claude_brain's
+    dedicated coding-walkthrough mode."""
+    q = (question or "").lower()
+    if _contains_any(q, _CODING) or _contains_any(q, _HARD_CODING) or _contains_any(q, _CODING_HINTS):
+        return True
+    if screen_context:
+        s = screen_context.lower()
+        if len(s) > 120 and _contains_any(s, _SCREEN_CODE_SIGNALS):
+            return True
+    return False
+
+
 class RouteDecision:
     """The routing result: which model + how hard it should think."""
 

@@ -78,7 +78,7 @@ class AIKeyListener(GhostKeyListener):
 
     def __init__(self, on_document_switch, on_back, on_quit, on_ctrl_toggle=None,
                  on_ai_view=None, on_kill=None, on_answer_now=None,
-                 on_vision=None, on_hud_toggle=None, on_ask=None):
+                 on_vision=None, on_hud_toggle=None, on_ask=None, on_text_toggle=None):
         super().__init__(on_document_switch, on_back, on_quit, on_ctrl_toggle)
         self._on_ai_view = on_ai_view
         self._on_kill = on_kill
@@ -86,6 +86,7 @@ class AIKeyListener(GhostKeyListener):
         self._on_vision = on_vision           # double-tap Right-Shift
         self._on_hud_toggle = on_hud_toggle   # double-tap Right-Command
         self._on_ask = on_ask                 # Ctrl+A -> focus the Ask input
+        self._on_text_toggle = on_text_toggle # Ctrl+B -> dark/light text toggle
         self._alt_pressed = False
         self._last_ralt_time = 0.0   # for double-tap Right Option detection
         self._last_rshift_time = 0.0  # for double-tap Right Shift (vision)
@@ -166,6 +167,16 @@ class AIKeyListener(GhostKeyListener):
             if is_a:
                 if self._on_ask:
                     self._on_ask()
+                return
+
+        # Ctrl+B -> toggle dark/light text (readable over a white background).
+        # Ctrl+B yields the control char '\x02' on macOS; accept the letter + vk 11 too.
+        if self._ctrl_pressed:
+            is_b = (getattr(key, "char", None) in ("\x02", "b", "B")
+                    or (getattr(key, "vk", None) == 11))
+            if is_b:
+                if self._on_text_toggle:
+                    self._on_text_toggle()
                 return
 
         # Ctrl + number keys
@@ -327,6 +338,7 @@ class GhostAIApp:
             on_vision=self._on_vision,
             on_hud_toggle=self._on_hud_toggle,
             on_ask=self._focus_ask_threadsafe,
+            on_text_toggle=self._toggle_text_threadsafe,
         )
         self._keys.start()
 
@@ -1282,6 +1294,14 @@ class GhostAIApp:
         # Hold Ctrl to also interact with (scroll) the floating SCREEN box.
         if self._screen_box:
             self._screen_box.set_interactive(pressed)
+
+    def _toggle_text_threadsafe(self):
+        """Ctrl+B: flip the AI text between light and near-black so it stays readable
+        when the screen behind Ghost is white."""
+        def _do():
+            if self._current_view == "ai":
+                self._eval_ai_js("GhostAI.toggleTextColor()")
+        NSOperationQueue.mainQueue().addOperationWithBlock_(_do)
 
     def _focus_ask_threadsafe(self):
         """Ctrl+A: focus the 'Ask the LLM' input so the user can type a question

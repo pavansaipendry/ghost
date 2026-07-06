@@ -13,6 +13,7 @@ const GhostAI = {
         interviewer: { level: 0, on: false, enabled: true },
         you: { level: 0, on: false, enabled: false },
     },
+    darkText: false,         // Ctrl+B: dark text for white backgrounds behind Ghost
 
     init() { this.render(); },
 
@@ -34,6 +35,7 @@ const GhostAI = {
             </div>`;
         this._wireAsk();
         this._scroll();
+        document.body.classList.toggle('dark-text', this.darkText);  // survive re-renders
     },
 
     // Two live level meters — "THEM" (interviewer / BlackHole) and "YOU" (mic).
@@ -92,6 +94,13 @@ const GhostAI = {
     focusAsk() {
         const input = document.getElementById('ai-ask-input');
         if (input) { input.focus(); input.select(); }
+    },
+
+    // Ctrl+B: flip the readable text between light (default) and near-black, so it
+    // stays visible when the screen behind Ghost is white.
+    toggleTextColor() {
+        this.darkText = !this.darkText;
+        document.body.classList.toggle('dark-text', this.darkText);
     },
 
     _renderChat() {
