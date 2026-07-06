@@ -16,15 +16,6 @@ DATA_FILES = [
     ('ghost/config', [
         'ghost/config/settings.toml',
     ]),
-    ('documents', [
-        'sample_docs/Set_1_Video_Streaming_Service.md',
-        'sample_docs/Set_2_Facebook_NewsFeed.md',
-        'sample_docs/Set_3_Uber_Carpool.md',
-        'sample_docs/Set_4_DoorDash_Grocery.md',
-        'sample_docs/Set_5_Social_Network_Private_Accounts.md',
-        'sample_docs/Set_6_Car_Rental_Expansion.md',
-        'sample_docs/Set_7_Messaging_App.md',
-    ]),
 ]
 
 OPTIONS = {

@@ -33,3 +33,6 @@ relay_server/
 
 # gitlink form (no trailing slash) so a git add -A can't re-add it
 relay_server
+
+# Study material / non-code PDFs
+*.pdf
