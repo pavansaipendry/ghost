@@ -38,8 +38,10 @@ echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
 # optional — only if you run with --deepgram (cloud STT):
 echo "DEEPGRAM_API_KEY=..." >> .env
 
-# 5. Run (first launch downloads the speech models — needs internet, ~1-2 min)
-./run_ghost.sh --parakeet
+# 5. Run (first launch downloads the on-device speech models — needs internet, ~1-2 min)
+./run_ghost.sh --parakeet        # on-device, no extra key — the zero-setup default
+# or, for faster cloud STT (needs the DEEPGRAM_API_KEY from step 4):
+# ./run_ghost.sh --deepgram
 ```
 
 ### Grant permissions
