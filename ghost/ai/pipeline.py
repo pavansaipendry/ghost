@@ -61,6 +61,28 @@ MAX_UTTERANCE_SECONDS = 20.0
 # question. The manual answer-now hotkey bypasses this entirely.
 MERGE_WINDOW_SECONDS = 1.6
 
+# Completeness gate: a finalized fragment that trails off mid-clause (no terminal
+# punctuation, ends on a connective/function word) is a PAUSE, not the end of the
+# question — hold it (up to the cap) for the continuation instead of answering half the
+# question and then answering the rest as a disconnected new one.
+_COMPLETE_HOLD_CAP = 2.5
+_INCOMPLETE_TAIL = {
+    "and", "but", "so", "or", "because", "the", "a", "an", "to", "of", "for", "with",
+    "in", "on", "at", "as", "is", "are", "was", "were", "that", "which", "what", "how",
+    "when", "where", "why", "who", "can", "could", "would", "should", "do", "does", "did",
+    "if", "my", "your", "our", "their", "i", "we", "you", "they", "he", "she", "it",
+    "this", "these", "those", "about", "into", "like", "between", "from", "than", "then",
+    "also", "not", "um", "uh", "okay",
+}
+
+
+def _looks_incomplete(text: str) -> bool:
+    t = (text or "").strip()
+    if not t or t[-1] in ".?!":
+        return False                     # punctuated (Deepgram smart_format) → complete
+    last = t.split()[-1].strip(",;:\"'").lower()
+    return last in _INCOMPLETE_TAIL
+
 # How often the dedicated flush thread checks whether a pending merged turn is
 # ready to answer. See _flush_loop for why this is a thread and not piggybacked
 # on incoming audio chunks.
@@ -94,6 +116,7 @@ class GhostAIPipeline:
         track_user_voice: bool = False,
         contextual_strings: list = None,
         use_parakeet: bool = False,
+        use_deepgram: bool = False,
     ):
         """
         Args:
@@ -124,6 +147,11 @@ class GhostAIPipeline:
         self._whisper_model = whisper_model
         self._contextual_strings = contextual_strings or []
         self._use_parakeet = use_parakeet
+        self._use_deepgram = use_deepgram
+        # Deepgram emits a reliable ~0.5s end-of-speech signal (speech_final), so the
+        # fragment-merge window — which exists to coalesce fragments from FLAKY on-device
+        # endpointing — can be tiny. Left at 1.6s it would mask the cloud endpoint's speed.
+        self._merge_window = 0.8 if use_deepgram else MERGE_WINDOW_SECONDS
 
         # Components
         self._capture = None
@@ -197,7 +225,12 @@ class GhostAIPipeline:
         # (no ~20-30min recognizer death, no vanishing partials); Apple stays as the
         # opt-out low-latency word-by-word engine. Parakeet is imported lazily so the
         # Apple path never pays the mlx/model load.
-        if self._use_parakeet:
+        if self._use_deepgram:
+            # CLOUD path (opt-in): interviewer audio streams to Deepgram for a fast
+            # ~0.5s endpoint. Lazily imported so the on-device paths never load it.
+            from ghost.ai.deepgram_stt import DeepgramSTT
+            engine_cls = DeepgramSTT
+        elif self._use_parakeet:
             from ghost.ai.parakeet_stt import ParakeetSTT
             engine_cls = ParakeetSTT
         else:
@@ -215,6 +248,8 @@ class GhostAIPipeline:
             on_final=self._handle_iv_final,
             contextual_strings=self._contextual_strings,
         )
+        if self._use_deepgram:
+            self._stt._label = "interviewer"
         self._stt.start()
 
         if self._use_blackhole:
@@ -281,7 +316,21 @@ class GhostAIPipeline:
             self._maybe_flush_pending(time.time())
 
     def _start_user_voice(self):
-        """Spin up the independent user-voice (mlx-whisper) transcriber."""
+        """Spin up the independent user-voice transcriber. With --deepgram, YOUR mic
+        streams to a SECOND Deepgram connection (so BOTH voices now leave the machine);
+        the interviewer-echo gate is applied in _feed_user so interviewer bleed-through
+        is never mislabeled as 'you'."""
+        if self._use_deepgram:
+            from ghost.ai.deepgram_stt import DeepgramSTT
+            self._user_voice = DeepgramSTT(
+                locale=self._locale,
+                on_partial=lambda t: self._handle_user_live(),
+                on_final=self._handle_user_final,
+                contextual_strings=self._contextual_strings,
+                label="you",
+            )
+            self._user_voice.start()
+            return
         self._user_voice = UserVoiceTranscriber(
             on_final=self._handle_user_final,
             on_live=self._handle_user_live,
@@ -443,6 +492,11 @@ class GhostAIPipeline:
         self._emit_levels("you", energy, time.time())
         if self._on_audio_chunk:
             self._on_audio_chunk(audio_chunk)
+        # Echo gate for the Deepgram user path: UserVoiceTranscriber gates internally,
+        # but a raw DeepgramSTT does not — drop mic audio while the interviewer is active
+        # so their bleed-through the mic is never transcribed as "you".
+        if self._use_deepgram and self._interviewer_active():
+            return
         self._user_voice.feed(audio_chunk)
 
     # ── Level metering (per-source + overall) ──
@@ -513,7 +567,12 @@ class GhostAIPipeline:
                 return
             if not self._pending_answer_text or self._iv_active_flag:
                 return
-            if (now - self._pending_answer_since) < MERGE_WINDOW_SECONDS:
+            if (now - self._pending_answer_since) < self._merge_window:
+                return
+            # Don't answer a question that trailed off mid-clause; wait for the rest
+            # (bounded by the cap so a genuine trail-off still eventually fires).
+            if (_looks_incomplete(self._pending_answer_text)
+                    and (now - self._pending_answer_since) < _COMPLETE_HOLD_CAP):
                 return
             text = self._pending_answer_text
             self._pending_answer_text = ""

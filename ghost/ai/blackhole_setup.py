@@ -81,6 +81,69 @@ _ca.AudioObjectSetPropertyData.argtypes = [
 ]
 
 
+# ── Volume control ──
+# macOS disables the system volume slider for a Multi-Output Device ('Ghost Audio'), so
+# once Ghost switches output there, volume is frozen. Work around it by setting the volume
+# of the underlying REAL output device (speakers/AirPods) directly via CoreAudio.
+kAudioDevicePropertyVolumeScalar = _fourcc('volm')
+
+_ca.AudioObjectHasProperty.restype = ctypes.c_bool
+_ca.AudioObjectHasProperty.argtypes = [
+    AudioObjectID, ctypes.POINTER(AudioObjectPropertyAddress),
+]
+
+
+def _volume_address(element):
+    return AudioObjectPropertyAddress(
+        kAudioDevicePropertyVolumeScalar, kAudioObjectPropertyScopeOutput, element)
+
+
+def get_device_volume(device_id):
+    """Device output volume 0.0-1.0 (master element, else channel 1), or None."""
+    for element in (kAudioObjectPropertyElementMain, 1):
+        addr = _volume_address(element)
+        if not _ca.AudioObjectHasProperty(device_id, ctypes.byref(addr)):
+            continue
+        val = ctypes.c_float(0.0)
+        size = UInt32(ctypes.sizeof(val))
+        st = _ca.AudioObjectGetPropertyData(
+            device_id, ctypes.byref(addr), 0, None, ctypes.byref(size), ctypes.byref(val))
+        if st == 0:
+            return float(val.value)
+    return None
+
+
+def set_device_volume(device_id, scalar):
+    """Set a device's output volume 0.0-1.0 (master + both channels). True if any took."""
+    scalar = max(0.0, min(1.0, float(scalar)))
+    ok = False
+    for element in (kAudioObjectPropertyElementMain, 1, 2):
+        addr = _volume_address(element)
+        if not _ca.AudioObjectHasProperty(device_id, ctypes.byref(addr)):
+            continue
+        val = ctypes.c_float(scalar)
+        st = _ca.AudioObjectSetPropertyData(
+            device_id, ctypes.byref(addr), 0, None,
+            UInt32(ctypes.sizeof(val)), ctypes.byref(val))
+        if st == 0:
+            ok = True
+    return ok
+
+
+def nudge_output_volume(delta):
+    """Bump the REAL output device (under 'Ghost Audio') by delta. Returns the new
+    volume 0.0-1.0, or None if there's no controllable device."""
+    device_id, _, _ = find_output_device()
+    if not device_id:
+        return None
+    cur = get_device_volume(device_id)
+    if cur is None:
+        return None
+    new = max(0.0, min(1.0, cur + delta))
+    set_device_volume(device_id, new)
+    return new
+
+
 # ── Helper Functions ──
 
 def _get_property_size(obj_id, selector, scope=kAudioObjectPropertyScopeGlobal):

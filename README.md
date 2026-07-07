@@ -33,8 +33,10 @@ python3.12 -m venv venv
 source venv/bin/activate
 pip install -r requirements-full.txt
 
-# 4. Your API key (each machine keeps its own — never committed)
+# 4. Your API keys (each machine keeps its own — never committed)
 echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
+# optional — only if you run with --deepgram (cloud STT):
+echo "DEEPGRAM_API_KEY=..." >> .env
 
 # 5. Run (first launch downloads the speech models — needs internet, ~1-2 min)
 ./run_ghost.sh --parakeet
@@ -57,8 +59,15 @@ On first launch macOS will ask for these — grant all four in
 ./run_ghost.sh --parakeet
 ```
 
-- `--parakeet` uses the on-device Parakeet engine for both voices (recommended).
-- Leave it off to use the Apple Speech engine instead.
+- `--parakeet` uses the on-device Parakeet engine for both voices (recommended, fully local).
+- `--deepgram` uses **Deepgram (cloud)** streaming STT instead — much faster end-of-speech
+  detection (~0.5s vs ~2s) and strong tech-term accuracy, but it streams your call audio to
+  Deepgram's servers (NOT on-device) and needs `DEEPGRAM_API_KEY` in `.env`
+  (get one at console.deepgram.com). Both voices go through Deepgram in this mode.
+- Leave both off to use the Apple Speech engine.
+
+Answers route by difficulty for speed: quick/behavioral → Haiku (~0.5s to first word),
+typical → Sonnet, hard design/coding → Opus.
 
 Use **headphones** so your mic doesn't echo the other side. On speakers, add
 `--interviewer-only`.
@@ -75,9 +84,35 @@ Use **headphones** so your mic doesn't echo the other side. On speakers, add
 | **Double-tap Right-Option** | Answer the current question now |
 | **Double-tap Right-Shift** | Answer what's on the screen (vision) |
 | **Double-tap Right-Command** | Toggle the floating screen box |
+| **Ctrl + ↑ ↓ ← →** | Move the overlay window |
+| **Ctrl + `[` / `]`** | Window taller / shorter |
+| **Ctrl + `,` / `.`** (`<` / `>`) | Window wider / narrower |
+| **Ctrl + `-` / `=`** | Volume down / up (works even while the Ghost Audio device is active) |
 | **Ctrl + 9** | Kill switch |
 
+These window/volume hotkeys are suppressed at the system level, so they make no beep and
+don't trigger macOS Mission Control / Spaces.
+
 ---
+
+## Menu-bar app — launch without the terminal (optional, not yet enabled)
+
+A 👻 menu-bar controller (`ghost/ai/controller.py`) and a double-click `Ghost.app`
+are built and working. They let you Start/Stop Ghost from the menu bar instead of
+a terminal. **They're not active yet** because this repo lives under `~/Desktop`,
+which macOS privacy-protects — a Finder-launched app can't read the venv there and
+dies with `Operation not permitted`. To enable it later, do **one** of:
+
+- **Grant Full Disk Access to `Ghost.app`** (System Settings → Privacy & Security →
+  Full Disk Access), then double-click `Ghost.app`. Ad-hoc code-sign it first so the
+  grant sticks: `codesign --force --deep -s - Ghost.app`.
+- **Move the repo out of `~/Desktop`** (e.g. `~/ghost`) — no permission needed.
+
+Until then, keep launching from the terminal with `./run_ghost.sh --parakeet`.
+Startup problems with the menu-bar app are logged to `logs/launcher.log`.
+
+Manual run of the controller (from a terminal that already has Desktop access):
+`venv/bin/python -m ghost.ai.controller`.
 
 ## Keeping two Macs in sync
 

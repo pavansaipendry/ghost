@@ -1,0 +1,24 @@
+#!/bin/bash
+# Ghost.app launcher stub — starts the menu-bar controller with NO terminal.
+#
+# This bundle lives at the repo root: <repo>/Ghost.app/Contents/MacOS/Ghost.
+# We resolve <repo> RELATIVE to this file (not a hardcoded path) so the same
+# committed bundle works on every Mac the repo is synced to.
+set -e
+
+HERE="$(cd "$(dirname "$0")" && pwd)"          # <repo>/Ghost.app/Contents/MacOS
+REPO="$(cd "$HERE/../../.." && pwd)"            # <repo>
+cd "$REPO"
+
+# Leave a breadcrumb so a failed Finder launch is debuggable (Finder discards our
+# stdout/stderr). Tail logs/launcher.log if the menu-bar 👻 never shows up.
+mkdir -p "$REPO/logs"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] launcher: REPO=$REPO PWD=$PWD" >> "$REPO/logs/launcher.log"
+
+PY="$REPO/venv/bin/python"
+if [ ! -x "$PY" ]; then
+  /usr/bin/osascript -e 'display alert "Ghost: venv not found" message "Expected venv/bin/python in the repo. Rebuild it with:\n\npython3 -m venv venv && venv/bin/pip install -r requirements-full.txt"'
+  exit 1
+fi
+
+exec "$PY" -m ghost.ai.controller >> "$REPO/logs/launcher.log" 2>&1

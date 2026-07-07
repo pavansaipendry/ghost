@@ -58,9 +58,12 @@ const GhostAI = {
     _renderBanner() {
         if (!this.banner) return '';
         const kind = this.banner.kind || 'error';
-        return `<div class="ai-banner ai-banner-${kind}">
-            <span class="ai-banner-icon">${kind === 'ok' ? '✅' : '⛔'}</span>
-            <span class="ai-banner-text">${this.escapeHtml(this.banner.message)}</span>
+        // Minimal: just a symbol (🔇 = interviewer audio not reaching Ghost; 🎧 = back),
+        // not a paragraph of text. The full detail stays in the title attribute.
+        const icon = kind === 'ok' ? '🎧' : '🔇';
+        return `<div class="ai-banner ai-banner-${kind}" style="justify-content:center;padding:4px;"
+            title="${this.escapeHtml(this.banner.message)}">
+            <span class="ai-banner-icon">${icon}</span>
         </div>`;
     },
 

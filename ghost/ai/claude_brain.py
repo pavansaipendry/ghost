@@ -290,6 +290,13 @@ def detect_answer_mode(question: str, is_follow_up: bool = False) -> str:
 #   4. "Tell me about yourself" is its own category (~30-40s) instead of being
 #      crushed into the 2-3 sentence motivational bucket - a 2-3 sentence intro
 #      reads as unprepared in a real interview.
+# Guard against the model role-playing both sides — emitting "Interviewer:" / "Me:" / a
+# speaker label (it mimics the transcript format in the history, especially on Haiku). We
+# cut the answer at the first such label; the lookahead keeps it from ever being shown.
+_ROLEPLAY_RE = re.compile(r'(?im)^[ \t]*(interviewer|me|you|candidate|assistant)[ \t]*:')
+_ROLEPLAY_LOOKAHEAD = 16
+
+
 SYSTEM_PROMPT = """You ARE me - a real candidate speaking out loud in a live interview, first person. Sound like a sharp, normal human, never like an AI. Every response should contain some filler words like "um" or "you know", "like" general english filler words. But for the answers, be concise and direct.
 
 LENGTH - the one rule: answer the question COMPLETELY, in the fewest words that still cover it, then stop. Think in speaking time, not word count - most answers are 10-30 seconds said out loud. The times below are what a good candidate actually spends per question type; treat them as strong guidance. When they conflict, two tiebreakers:
@@ -313,6 +320,7 @@ NEVER:
 - NEVER anticipate future questions. Do not append "possible follow-up questions", "they might also ask", "you could be asked next", "some related questions", or any menu of what could come next. Answer ONLY the exact question on the table right now, then STOP. A real candidate answers what was asked and waits - they don't hand the interviewer a list of other questions.
 - No document formatting. The output is words I SAY out loud, not a written report: no markdown section headers (## / **1.**), no "Say:" / "Spoken plan:" / "Restate intent" labels, no "This is a [type] question", no "here's the model answer", and never restate the question as a title or heading. Just talk. (A fenced ```code block for actual code is the ONE exception.)
 - Don't stop mid-sentence or cut a code block. Finish the thought; keep the thought short.
+- NEVER write speaker labels or role-play the conversation. Your output is ONLY my words, first person — never write "Interviewer:", "Me:", "You:", "Candidate:", "Q:", "A:" or any label, never echo or restate what the interviewer said, and never produce both sides of the exchange. The "Interviewer:" / "Me:" labels in the transcript below are for your reference ONLY — never reproduce them in your answer.
 
 VOICE: contractions (I'd, we're, that's), natural spoken rhythm, confident but not arrogant, straight to the point.
 
@@ -362,10 +370,11 @@ class ClaudeBrain:
         self._client = anthropic.Anthropic(api_key=self._api_key)
         self._context_loader = context_loader or ContextLoader()
         self._model = model
-        # Per-question model routing: QUICK/STANDARD/DEEP tiers. The QUICK tier uses
-        # `model` (the configured default) so existing behavior holds for simple
-        # questions; harder questions escalate. Local heuristic - no added latency.
-        self._router = ModelRouter(quick_model=model)
+        # Per-question model routing: QUICK->Haiku, STANDARD->Sonnet, DEEP->Opus (router
+        # defaults). The configured `--model` maps to the DEEP ceiling; simple questions
+        # answer on the fast tiers (Haiku ~0.5s TTFT) instead of paying Opus latency on
+        # everything. Local heuristic - no added latency. See ModelRouter.
+        self._router = ModelRouter(deep_model=model)
         self._conversation_history = ""
         self._lock = threading.Lock()
         self._current_stream = None
@@ -698,15 +707,26 @@ class ClaudeBrain:
         if thinking:
             kwargs["thinking"] = thinking
 
+        # Stream, but guard against the model role-playing both sides ("Interviewer:",
+        # "Me:", a speaker label at a line start). Emit with a small lookahead so a
+        # forming label is never shown; cut the answer the moment one appears.
         full_text = ""
+        emitted = 0
         with self._client.messages.stream(**kwargs) as stream:
             for text in stream.text_stream:
                 if cancel_flag.is_set():
                     break
                 full_text += text
-                if on_token:
-                    on_token(text)
-
+                m = _ROLEPLAY_RE.search(full_text)
+                if m:
+                    full_text = full_text[:m.start()].rstrip()
+                    break
+                safe = len(full_text) - _ROLEPLAY_LOOKAHEAD
+                if on_token and safe > emitted:
+                    on_token(full_text[emitted:safe])
+                    emitted = safe
+        if on_token and emitted < len(full_text):
+            on_token(full_text[emitted:])       # flush the cleaned tail
         return full_text
 
     def _build_system_blocks(self, coding_mode: bool = False) -> list:

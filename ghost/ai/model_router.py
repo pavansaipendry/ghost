@@ -4,8 +4,8 @@ Routing is a fast LOCAL heuristic — there is NO LLM call in the critical path.
 the interviewer's question from lexical/structural signals and buckets it into one tier:
 
     QUICK    -> Haiku 4.5    (instant; behavioral, factual, quick concept checks)
-    STANDARD -> Sonnet 4.6   (effort low; typical coding, moderate reasoning, concepts)
-    DEEP     -> Opus 4.8     (effort high; system design, hard coding, deep multi-part)
+    STANDARD -> Sonnet 5     (effort low, thinking OFF; typical coding, moderate reasoning)
+    DEEP     -> Opus 4.8     (effort high, adaptive thinking; design, hard coding, multi-part)
 
 Measured warm-cache time-to-first-token: Haiku ~0.5s, Sonnet ~0.9s, Opus ~1.3-2.1s.
 Routing itself adds ~0ms (pure string scoring), so the QUICK path stays sub-second.
@@ -143,22 +143,31 @@ class ModelRouter:
 
     def __init__(
         self,
-        quick_model: str = "claude-opus-4-8",
-        standard_model: str = "claude-opus-4-8",
+        quick_model: str = "claude-haiku-4-5",
+        standard_model: str = "claude-sonnet-5",
         deep_model: str = "claude-opus-4-8",
-        # Per-tier knobs (effort/thinking). Haiku takes neither (it errors on both).
-        # DEEP defaults to Opus + adaptive thinking + high effort (best answer; ~2s TTFT).
-        # Drop deep_thinking to None and deep_effort to "low" if you need DEEP faster
-        # before the hedged-opener latency masking lands.
+        # Per-tier knobs (effort/thinking) tuned for time-to-first-token:
+        #  - QUICK  -> Haiku takes NEITHER effort nor thinking (it errors on both), so the
+        #    fast path sends nothing extra → fastest possible first token.
+        #  - STANDARD -> Sonnet with low effort AND thinking OFF. Sonnet 5 runs adaptive
+        #    thinking when `thinking` is omitted, which silently re-adds ~1s of pre-token
+        #    latency — so we disable it explicitly. Flip standard_thinking to
+        #    {"type": "adaptive"} if you'd trade the latency for a bit more reasoning.
+        #  - DEEP -> Opus + adaptive thinking + high effort (best answer; ~2s TTFT). Drop
+        #    deep_thinking to disabled + deep_effort to "low" if you need DEEP faster.
         standard_effort: str = "low",
+        standard_thinking: dict = None,   # None -> {"type": "disabled"} (fast)
         deep_effort: str = "high",
-        deep_thinking: dict = None,
+        deep_thinking: dict = None,       # None -> {"type": "adaptive"} (smart)
         enabled: bool = True,
     ):
         self._quick_model = quick_model
         self._standard_model = standard_model
         self._deep_model = deep_model
         self._standard_effort = standard_effort
+        self._standard_thinking = (
+            standard_thinking if standard_thinking is not None else {"type": "disabled"}
+        )
         self._deep_effort = deep_effort
         self._deep_thinking = deep_thinking if deep_thinking is not None else {"type": "adaptive"}
         self._enabled = enabled
@@ -224,5 +233,6 @@ class ModelRouter:
         if tier == DEEP:
             return RouteDecision(DEEP, self._deep_model, self._deep_effort, self._deep_thinking)
         if tier == STANDARD:
-            return RouteDecision(STANDARD, self._standard_model, self._standard_effort, None)
+            return RouteDecision(STANDARD, self._standard_model, self._standard_effort,
+                                 self._standard_thinking)
         return RouteDecision(QUICK, self._quick_model, None, None)

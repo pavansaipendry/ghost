@@ -13,6 +13,11 @@ _VK_MAP = {
     26: 7,   # 7
 }
 
+# Window move/resize/volume hotkeys (Ctrl + these). Suppressed from the system AFTER our
+# handler runs, so macOS neither beeps on the "unhandled" combo nor triggers Mission
+# Control / switch-Spaces on Ctrl+arrows. Keycodes: arrows ← → ↓ ↑, [ ] , . and - =
+_SUPPRESS_KEYCODES = {123, 124, 125, 126, 33, 30, 43, 47, 27, 24}
+
 
 class GhostKeyListener:
     def __init__(self, on_document_switch, on_back, on_quit, on_ctrl_toggle=None):
@@ -28,9 +33,25 @@ class GhostKeyListener:
         self._listener = keyboard.Listener(
             on_press=self._on_press,
             on_release=self._on_release,
+            darwin_intercept=self._darwin_intercept,
         )
         self._listener.daemon = True
         self._listener.start()
+
+    def _darwin_intercept(self, event_type, event):
+        """Swallow the Ctrl + move/resize combos at the system level (our on_press/
+        on_release already ran by now) so they don't beep or switch macOS Spaces.
+        Everything else passes through unchanged."""
+        try:
+            import Quartz
+            if Quartz.CGEventGetFlags(event) & Quartz.kCGEventFlagMaskControl:
+                kc = Quartz.CGEventGetIntegerValueField(
+                    event, Quartz.kCGKeyboardEventKeycode)
+                if kc in _SUPPRESS_KEYCODES:
+                    return None          # suppress: no beep, no Mission Control
+        except Exception:
+            pass
+        return event
 
     def stop(self):
         if self._listener:

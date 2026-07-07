@@ -19,6 +19,9 @@ dist/
 # Session recordings + transcripts — large, personal, per-machine
 sessions/
 
+# Runtime logs + the controller's single-instance lock (per-machine)
+logs/
+
 # Editor / OS cruft
 .DS_Store
 *.bak

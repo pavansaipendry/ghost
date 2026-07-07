@@ -17,6 +17,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import sys
 import threading
 import time
@@ -24,7 +25,7 @@ import platform
 
 import AppKit
 from AppKit import NSApplication, NSApplicationActivationPolicyAccessory, NSOperationQueue
-from Foundation import NSURL
+from Foundation import NSURL, NSTimer
 
 from ghost.config import get_config, save_state
 from ghost.window.panel import GhostPanel
@@ -78,8 +79,12 @@ class AIKeyListener(GhostKeyListener):
 
     def __init__(self, on_document_switch, on_back, on_quit, on_ctrl_toggle=None,
                  on_ai_view=None, on_kill=None, on_answer_now=None,
-                 on_vision=None, on_hud_toggle=None, on_ask=None, on_text_toggle=None):
+                 on_vision=None, on_hud_toggle=None, on_ask=None, on_text_toggle=None,
+                 on_move=None, on_resize=None, on_volume=None):
         super().__init__(on_document_switch, on_back, on_quit, on_ctrl_toggle)
+        self._on_move = on_move               # Ctrl+arrows -> nudge the window
+        self._on_resize = on_resize           # Ctrl+[ ] < > -> grow/shrink the window
+        self._on_volume = on_volume           # Ctrl+- / Ctrl+= -> volume down/up
         self._on_ai_view = on_ai_view
         self._on_kill = on_kill
         self._on_answer_now = on_answer_now
@@ -158,6 +163,25 @@ class AIKeyListener(GhostKeyListener):
             if hasattr(key, "vk") and key.vk == 12:
                 self._on_quit()
                 return
+
+        # Ctrl + arrows -> nudge the overlay; Ctrl + [ ] < > -> resize it (30px steps).
+        if self._ctrl_pressed:
+            STEP = 30
+            if self._on_move:
+                if key == keyboard.Key.up:    self._on_move(0, STEP);  return
+                if key == keyboard.Key.down:  self._on_move(0, -STEP); return
+                if key == keyboard.Key.left:  self._on_move(-STEP, 0); return
+                if key == keyboard.Key.right: self._on_move(STEP, 0);  return
+            if self._on_resize:
+                vk = getattr(key, "vk", None)
+                if vk == 43:  self._on_resize(STEP, 0);  return   # , / <  -> wider
+                if vk == 47:  self._on_resize(-STEP, 0); return   # . / >  -> narrower
+                if vk == 33:  self._on_resize(0, STEP);  return   # [      -> taller
+                if vk == 30:  self._on_resize(0, -STEP); return   # ]      -> shorter
+            if self._on_volume:
+                vk = getattr(key, "vk", None)
+                if vk == 27:  self._on_volume(-0.06); return      # -      -> quieter
+                if vk == 24:  self._on_volume(0.06);  return      # = / +  -> louder
 
         # Ctrl+A -> focus the "Ask the LLM" input (type a question without clicking).
         # Ctrl+A yields the control char '\x01' on macOS; accept the letter + vk 0 too.
@@ -297,6 +321,7 @@ class GhostAIApp:
         parser.add_argument("--blackhole", action="store_true", help="Use BlackHole virtual audio device for lossless capture (requires: brew install blackhole-2ch)")
         parser.add_argument("--interviewer-only", action="store_true", help="SPEAKERS mode: ignore the mic entirely so the interviewer is NEVER mislabeled as you (you lose your own-voice capture, but no mixing). Use this if you're not on headphones.")
         parser.add_argument("--parakeet", action="store_true", help="Use on-device Parakeet (NVIDIA TDT via mlx) for the interviewer transcript instead of Apple SFSpeech. Fixes the ~20-30min recognizer death + vanishing partials and improves tech-term accuracy. Still 100%% local.")
+        parser.add_argument("--deepgram", action="store_true", help="Use Deepgram (CLOUD) streaming STT for the interviewer transcript — fast ~0.5s end-of-speech endpoint. NOT on-device: interviewer audio is streamed to Deepgram's servers. Needs DEEPGRAM_API_KEY in .env.")
         parser.add_argument("--no-screen", action="store_true", help="Disable on-device screen-vision (Ghost reads the shared screen/coding pad via OCR by default)")
         parser.add_argument("--screen-app", default=None, help="App window to read on-screen (defaults to --app; e.g. read 'Google Chrome' coding pad while listening to 'zoom.us')")
         parser.add_argument("files", nargs="*", help="Document files to load (optional)")
@@ -339,6 +364,9 @@ class GhostAIApp:
             on_hud_toggle=self._on_hud_toggle,
             on_ask=self._focus_ask_threadsafe,
             on_text_toggle=self._toggle_text_threadsafe,
+            on_move=self._move_window_threadsafe,
+            on_resize=self._resize_window_threadsafe,
+            on_volume=self._adjust_volume_threadsafe,
         )
         self._keys.start()
 
@@ -388,8 +416,10 @@ class GhostAIApp:
                 # Catch it HERE, loudly, so it can be fixed before the interview.
                 # (This is the ONLY place the audible test tone is allowed: we're
                 # pre-interview by definition. Never run it mid-session.)
-                print("[GhostAI] Testing audio routing (you'll hear a short blip)...")
-                ok, rms = verify_blackhole_routing()
+                # No audible pre-flight tone — a launch beep is a stealth leak. Routing is
+                # verified PASSIVELY by the level meters + the _check_routing_loss watchdog,
+                # which surfaces the banner within seconds if the interviewer feed is dead.
+                ok, rms = True, 0.0
                 self._blackhole_mode = True
                 if ok:
                     print(f"[GhostAI] ✅ Audio routing OK - BlackHole is receiving system audio (rms={rms:.3f}).")
@@ -424,6 +454,7 @@ class GhostAIApp:
                 # disables the mic so the interviewer is never mislabeled as you.
                 track_user_voice=not args.interviewer_only,
                 use_parakeet=args.parakeet,
+                use_deepgram=args.deepgram,
             )
 
         # Set up screen-vision - Ghost reads the shared screen / coding pad (OCR,
@@ -460,10 +491,43 @@ class GhostAIApp:
             print(f"  Listening to: {args.app}")
         print()
 
+        # Shut down cleanly when supervised (the menu-bar controller's "Stop" sends
+        # SIGTERM) or on Ctrl+C. Without this, a SIGTERM hard-kills us before
+        # _quit() runs, leaving the system output stuck on 'Ghost Audio'.
+        self._install_signal_handlers()
+
         app.run()
 
+    def _install_signal_handlers(self):
+        """Route SIGTERM/SIGINT into the normal clean-quit path (restore audio,
+        finalize the session log, save window state).
+
+        Python delivers signals to the main thread, but the main thread is parked
+        inside -[NSApplication run] (ObjC), so a pending Python handler never gets a
+        turn on its own. A cheap repeating block-timer periodically re-enters the
+        interpreter, which is when Python dispatches the deferred handler.
+        """
+        def _handle(signum, _frame):
+            if getattr(self, "_shutting_down", False):
+                return
+            self._shutting_down = True
+            print(f"\n[GhostAI] Received signal {signum}; shutting down cleanly...")
+            self._quit_threadsafe()
+
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            try:
+                signal.signal(sig, _handle)
+            except (ValueError, OSError):
+                pass  # not on the main thread / unsupported — best effort
+
+        # Keep a ref so the timer isn't collected; the run loop retains it too.
+        self._signal_pump = NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
+            0.4, True, lambda _t: None
+        )
+
     def _setup_pipeline(self, target_app, whisper_model, voice_profile, use_mic=False,
-                        use_blackhole=False, track_user_voice=False, use_parakeet=False):
+                        use_blackhole=False, track_user_voice=False, use_parakeet=False,
+                        use_deepgram=False):
         """Initialize the AI audio pipeline."""
         # Bias the on-device recognizer toward my resume/JD vocabulary (project names,
         # tech jargon, acronyms) so the interviewer transcript stops mangling them.
@@ -492,6 +556,7 @@ class GhostAIApp:
                 use_blackhole=use_blackhole,
                 track_user_voice=track_user_voice,
                 use_parakeet=use_parakeet,
+                use_deepgram=use_deepgram,
             )
             self._pipeline.start()
             self._session_start = time.time()
@@ -1315,6 +1380,43 @@ class GhostAIApp:
             self._panel.panel.setIgnoresMouseEvents_(False)
             self._panel.panel.makeKeyAndOrderFront_(None)
             self._eval_ai_js("GhostAI.focusAsk()")
+        NSOperationQueue.mainQueue().addOperationWithBlock_(_do)
+
+    def _move_window_threadsafe(self, dx, dy):
+        """Ctrl+arrows: nudge the overlay by a few px. Cocoa's origin is bottom-left, so
+        +dy moves it up. The new position is saved on quit via get_window_state()."""
+        def _do():
+            if not self._panel:
+                return
+            p = self._panel.panel
+            f = p.frame()
+            p.setFrameOrigin_(AppKit.NSMakePoint(f.origin.x + dx, f.origin.y + dy))
+        NSOperationQueue.mainQueue().addOperationWithBlock_(_do)
+
+    def _resize_window_threadsafe(self, dw, dh):
+        """Ctrl+[ ] < >: grow/shrink the overlay (origin fixed at bottom-left, so it
+        expands up/right), clamped to a sane minimum."""
+        def _do():
+            if not self._panel:
+                return
+            p = self._panel.panel
+            f = p.frame()
+            w = max(240.0, f.size.width + dw)
+            h = max(160.0, f.size.height + dh)
+            p.setFrame_display_(AppKit.NSMakeRect(f.origin.x, f.origin.y, w, h), True)
+        NSOperationQueue.mainQueue().addOperationWithBlock_(_do)
+
+    def _adjust_volume_threadsafe(self, delta):
+        """Ctrl+- / Ctrl+=: change the volume of the REAL output device under 'Ghost
+        Audio' (macOS disables the volume slider for the Multi-Output aggregate)."""
+        def _do():
+            try:
+                from ghost.ai.blackhole_setup import nudge_output_volume
+                new = nudge_output_volume(delta)
+                if new is not None:
+                    print(f"[GhostAI] Volume {int(round(new * 100))}%")
+            except Exception as e:
+                print(f"[GhostAI] Volume adjust failed: {e}")
         NSOperationQueue.mainQueue().addOperationWithBlock_(_do)
 
     def _on_webview_message(self, body):
