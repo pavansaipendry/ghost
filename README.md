@@ -35,7 +35,8 @@ pip install -r requirements-full.txt
 
 # 4. Your API keys (each machine keeps its own — never committed)
 echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
-# optional — only if you run with --deepgram (cloud STT):
+# optional — ONLY if you run with --deepgram (cloud STT). The deepgram-sdk package
+# is already installed by step 3; this just adds the key:
 echo "DEEPGRAM_API_KEY=..." >> .env
 
 # 5. Run (first launch downloads the on-device speech models — needs internet, ~1-2 min)
@@ -144,3 +145,7 @@ to each machine by design.
   Security → Speech Recognition, then relaunch.
 - **First launch is slow** → it's downloading the speech models (one-time). Needs internet.
 - **`pip install` fails** → confirm you're on Python 3.12 and Apple Silicon (`python3.12 --version`, `uname -m` → `arm64`).
+- **`Failed to start audio pipeline: No module named 'deepgram'`** → you launched with
+  `--deepgram` but the SDK isn't installed. Either re-run `pip install -r requirements-full.txt`
+  (it's included now), or just use the on-device engine: `./run_ghost.sh --parakeet` (no key needed).
+  Note: a missing STT engine currently stops *all* listening, not just the cloud one.
