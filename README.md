@@ -13,6 +13,7 @@ fully on-device (Parakeet / Apple Speech); only the AI answers use the Claude AP
 - **Python 3.12**
 - **Homebrew** + **BlackHole 2ch** (virtual audio device, for capturing the other side's audio).
 - An **Anthropic API key** — https://console.anthropic.com
+- A **Deepgram API Key** - https://developers.deepgram.com/docs/create-additional-api-keys
 - **~3 GB free disk** (dependencies + speech models).
 - Internet: one-time to download models (~1.2 GB) and for the Claude API while running.
 
@@ -25,7 +26,7 @@ fully on-device (Parakeet / Apple Speech); only the AI answers use the Claude AP
 brew install python@3.12 blackhole-2ch
 
 # 2. Get the code
-gh repo clone pavansaipendry/ghost Ghost      # or: git clone <repo-url> Ghost
+git clone https://github.com/pavansaipendry/ghost Ghost (or) gh repo clone pavansaipendry/ghost Ghost   
 cd Ghost
 
 # 3. Python environment (do NOT copy an old venv — always rebuild it here)
@@ -35,14 +36,15 @@ pip install -r requirements-full.txt
 
 # 4. Your API keys (each machine keeps its own — never committed)
 echo "ANTHROPIC_API_KEY=sk-ant-..." > .env
-# optional — ONLY if you run with --deepgram (cloud STT). The deepgram-sdk package
+# if you run with --deepgram (cloud STT). The deepgram-sdk package
 # is already installed by step 3; this just adds the key:
-echo "DEEPGRAM_API_KEY=..." >> .env
+echo "DEEPGRAM_API_KEY=..." >> .env 
 
-# 5. Run (first launch downloads the on-device speech models — needs internet, ~1-2 min)
-./run_ghost.sh --parakeet        # on-device, no extra key — the zero-setup default
-# or, for faster cloud STT (needs the DEEPGRAM_API_KEY from step 4):
-# ./run_ghost.sh --deepgram
+# 5. Run
+# For faster cloud STT (needs the DEEPGRAM_API_KEY from step 4):
+./run_ghost.sh --deepgram        (Recommended) 
+# or, 
+ ./run_ghost.sh --parakeet        # on-device, no extra key — the zero-setup default
 ```
 
 ### Grant permissions
@@ -53,6 +55,8 @@ On first launch macOS will ask for these — grant all four in
 - Microphone
 - Accessibility (for the global hotkeys)
 - Speech Recognition
+
+Blackhole only works after restarting your mac.
 
 ---
 
