@@ -82,7 +82,7 @@ Use **headphones** so your mic doesn't echo the other side. On speakers, add
 ---
 
 ## Hotkeys
-
+Ghost only works while holding the `control ^` key
 | Shortcut | Action |
 |---|---|
 | Hold **Ctrl** | Make the overlay clickable (release = click-through again) |
